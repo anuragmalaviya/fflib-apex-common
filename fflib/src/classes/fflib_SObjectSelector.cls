@@ -28,12 +28,17 @@
  * Class providing common database query support for abstracting and encapsulating query logic
  **/
 public abstract with sharing class fflib_SObjectSelector
-	implements fflib_ISObjectSelector
+//FF_MOCKS	implements fflib_ISObjectSelector
 {
     /**
      * This overrides the Multi Currency handling, preventing it from injecting the CurrencyIsoCode fie ld for certain System objects that don't ever support it
      **/
     private static Set<String> STANDARD_WITHOUT_CURRENCYISO = new Set<String> { 'AsyncApexJob' };
+
+    /**
+     * This can be superceeded by the fflib_QueryFactory when using the enterprise extensions
+     **/
+    private fflib_StringBuilder.FieldListBuilder m_fieldListBuilder;
      
     /**
      * Should this selector automatically include the FieldSet fields when building queries?
@@ -54,18 +59,6 @@ public abstract with sharing class fflib_SObjectSelector
     * Order by field
     **/
     	private String m_orderBy;
-  
-   /**
-   * Describe helper
-   **/
-   	private fflib_SObjectDescribe describeWrapper {
-   		get {
-   			if(describeWrapper == null)
-   				describeWrapper = fflib_SObjectDescribe.getDescribe(getSObjectType());
-   			return describeWrapper;
-   		}
-   		set;
-   	}
    	 
     /**
      * Implement this method to inform the base class of the SObject (custom or standard) to be queried
@@ -103,7 +96,7 @@ public abstract with sharing class fflib_SObjectSelector
     public fflib_SObjectSelector(Boolean includeFieldSetFields, Boolean enforceCRUD, Boolean enforceFLS)
     {
         m_includeFieldSetFields = includeFieldSetFields;
-        m_enforceCRUD = enforceCRUD;
+        m_enforcecrud = enforceCRUD;
         m_enforceFLS = enforceFLS;
     }
 
@@ -121,13 +114,10 @@ public abstract with sharing class fflib_SObjectSelector
      **/
     public virtual String getOrderBy()
     {
-        if(m_orderBy == null) {
-   		m_orderBy = 'CreatedDate';
-   		if(describeWrapper.getNameField() != null) {
-	    		m_orderBy = describeWrapper.getNameField().getDescribe().getName();
-	    	}
-	}
-   	return m_orderBy;
+        if(m_orderBy == null)
+       		m_orderBy = 'CreatedDate';
+
+   	    return m_orderBy;
     }
 
     /** 
@@ -162,10 +152,15 @@ public abstract with sharing class fflib_SObjectSelector
      **/
     public fflib_StringBuilder.FieldListBuilder getFieldListBuilder()
     {
-        List<SObjectField> sObjectFields = new List<SObjectField>();
-        for(fflib_QueryFactory.QueryField queryField : newQueryFactory().getSelectedFields())
-            sObjectFields.add(queryField.getBaseField());
-        return new fflib_StringBuilder.FieldListBuilder(sObjectFields);
+        if(m_fieldListBuilder == null)
+            if(STANDARD_WITHOUT_CURRENCYISO.contains(getSObjectType().getDescribe().getName()))
+                m_fieldListBuilder = new fflib_StringBuilder.FieldListBuilder(
+                    getSObjectFieldList(), m_includeFieldSetFields ? getSObjectFieldSetList() : null);
+            else
+                m_fieldListBuilder = new fflib_StringBuilder.MultiCurrencyFieldListBuilder(
+                    getSObjectFieldList(), m_includeFieldSetFields ? getSObjectFieldSetList() : null);
+
+        return m_fieldListBuilder;
     }
 
     /**
@@ -205,7 +200,7 @@ public abstract with sharing class fflib_SObjectSelector
      **/
     public String getSObjectName()
     {
-        return describeWrapper.getDescribe().getName();
+        return getSObjectType().getDescribe().getName();
     }
     
     /**
@@ -218,6 +213,9 @@ public abstract with sharing class fflib_SObjectSelector
      **/
     public List<SObject> selectSObjectsById(Set<Id> idSet)
     {
+        if(m_enforceCRUD)
+            assertIsAccessible();
+
         return Database.query(buildQuerySObjectById());
     }
         
@@ -231,6 +229,9 @@ public abstract with sharing class fflib_SObjectSelector
      **/
     public Database.QueryLocator queryLocatorById(Set<Id> idSet)
     {
+        if(m_enforcecrud)
+            assertIsAccessible();
+            
         return Database.getQueryLocator(buildQuerySObjectById());
     }
     
@@ -265,130 +266,17 @@ public abstract with sharing class fflib_SObjectSelector
     }
     
     /**
-     * Returns a QueryFactory configured with the Selectors object, fields, fieldsets and default order by
-     **/
-    public fflib_QueryFactory newQueryFactory()
-    {    
-        return newQueryFactory(m_enforceCRUD, m_enforceFLS, true);
-    }
-    
-    /**
-     * Returns a QueryFactory configured with the Selectors object, fields, fieldsets and default order by
-     **/
-    public fflib_QueryFactory newQueryFactory(Boolean includeSelectorFields)
-    {    
-        return newQueryFactory(m_enforceCRUD, m_enforceFLS, includeSelectorFields);
-    }
-
-    /**
-     * Returns a QueryFactory configured with the Selectors object, fields, fieldsets and default order by
-     * CRUD and FLS read security will be checked if the corresponding inputs are true (overrides that defined in the selector).
-     **/
-    public fflib_QueryFactory newQueryFactory(Boolean assertCRUD, Boolean enforceFLS, Boolean includeSelectorFields)
-    {
-    	// Construct QueryFactory around the given SObject
-        return configureQueryFactory(
-        	new fflib_QueryFactory(getSObjectType2()), 
-        		assertCRUD, enforceFLS, includeSelectorFields);
-    }
-
-	/**
-	 * Adds the selectors fields to the given QueryFactory using the given relationship path as a prefix
-	 *
-	 * // TODO: This should be consistant (ideally) with configureQueryFactory below
-	 **/
-	public void configureQueryFactoryFields(fflib_QueryFactory queryFactory, String relationshipFieldPath)
-	{
-		// Add fields from selector prefixing the relationship path		
-		for(SObjectField field : getSObjectFieldList())		
-        	queryFactory.selectField(relationshipFieldPath + '.' + field.getDescribe().getName());
-        // Automatically select the CurrencyIsoCode for MC orgs (unless the object is a known exception to the rule)
-        if(Userinfo.isMultiCurrencyOrganization() &&
-           !STANDARD_WITHOUT_CURRENCYISO.contains(getSObjectType().getDescribe().getName()))
-            queryFactory.selectField(relationshipFieldPath+'.CurrencyIsoCode');		
-	}
-    
-    /**
-     * Adds a subselect QueryFactory based on this selector to the given QueryFactor, returns the parentQueryFactory
-     **/
-    public fflib_QueryFactory addQueryFactorySubselect(fflib_QueryFactory parentQueryFactory)
-    {    
-    	return addQueryFactorySubselect(parentQueryFactory, true);
-    }
-        
-    /**
-     * Adds a subselect QueryFactory based on this selector to the given QueryFactor
-     **/
-    public fflib_QueryFactory addQueryFactorySubselect(fflib_QueryFactory parentQueryFactory, Boolean includeSelectorFields)
-    {    	
-    	fflib_QueryFactory subSelectQueryFactory = 
-    		parentQueryFactory.subselectQuery(getSObjectType2());
-    	return configureQueryFactory(
-    		subSelectQueryFactory, 
-    		m_enforceCRUD, 
-    		m_enforceFLS, 
-    		includeSelectorFields);
-    }
-        
-    /**
      * Constructs the default SOQL query for this selector, see selectSObjectsById and queryLocatorById
-     **/    
+     **/
+    @TestVisible
     private String buildQuerySObjectById()
     {   
-        return newQueryFactory().setCondition('id in :idSet').toSOQL();
+        if(Type.forName(('fflib_QueryFactory')) != null)
+        {
+            // One day..
+            // return newQueryFactory().setCondition('id in :idSet').toSOQL();
+        }
+
+        return String.format('SELECT {0} FROM {1} WHERE id in :idSet ORDER BY {2}', new List<String>{getFieldListString(),getSObjectName(),getOrderBy()}); 
     }
-    	
-	/**
-	 * Configures a QueryFactory instance according to the configuration of this selector
-	 **/        
-    private fflib_QueryFactory configureQueryFactory(fflib_QueryFactory queryFactory, Boolean assertCRUD, Boolean enforceFLS, Boolean includeSelectorFields)
-    {
-        // CRUD and FLS security required?
-        if (assertCRUD)
-        {
-        	try { 
-        		// Leverage QueryFactory for CRUD checking 
-        		queryFactory.assertIsAccessible();
-        	} catch (fflib_SecurityUtils.CrudException e) {
-        		// Marshal exception into DomainException for backwards compatability
-				throw new fflib_SObjectDomain.DomainException(
-	                'Permission to access an ' + getSObjectType().getDescribe().getName() + ' denied.');               		
-        	}
-        }
-        queryFactory.setEnforceFLS(enforceFLS);
-                
-        // Configure the QueryFactory with the Selector fields?        
-        if(includeSelectorFields)
-        {
-	        // select the Selector fields and Fieldsets and set order
-	        queryFactory.selectFields(new Set<SObjectField>(getSObjectFieldList()));
-	        if(m_includeFieldSetFields)
-	            for(Schema.FieldSet fieldSet : getSObjectFieldSetList())
-	                queryFactory.selectFieldSet(fieldSet);
-	
-	        // Automatically select the CurrencyIsoCode for MC orgs (unless the object is a known exception to the rule)
-	        if(Userinfo.isMultiCurrencyOrganization() &&
-	           !STANDARD_WITHOUT_CURRENCYISO.contains(getSObjectType().getDescribe().getName()))
-	            queryFactory.selectField('CurrencyIsoCode');
-        }
-        
-        // Parse the getOrderBy()
-        for(String orderBy : getOrderBy().split(','))
-        {
-            // TODO: Handle NULLS FIRST and NULLS LAST, http://www.salesforce.com/us/developer/docs/soql_sosl/Content/sforce_api_calls_soql_select_orderby.htm
-            List<String> orderByParts = orderBy.trim().split(' ');
-            String fieldNamePart = orderByParts[0];
-            String fieldSortOrderPart = orderByParts.size() > 1 ? orderByParts[1] : null;
-            fflib_QueryFactory.SortOrder fieldSortOrder = fflib_QueryFactory.SortOrder.ASCENDING;
-            if(fieldSortOrderPart==null)
-                fieldSortOrder = fflib_QueryFactory.SortOrder.ASCENDING;
-            else if(fieldSortOrderPart.equalsIgnoreCase('DESC'))
-                fieldSortOrder = fflib_QueryFactory.SortOrder.DESCENDING;
-            else if(fieldSortOrderPart.equalsIgnoreCase('ASC'))
-                fieldSortOrder = fflib_QueryFactory.SortOrder.ASCENDING;
-            queryFactory.addOrdering(fieldNamePart, fieldSortOrder);
-        }           
-                
-        return queryFactory;    
-    }    
 }

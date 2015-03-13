@@ -207,7 +207,7 @@ public class fflib_SecurityUtils
     **/
     public static void checkFieldIsInsertable(SObjectType objType, String fieldName)
     {
-        checkFieldIsInsertable(objType, fflib_SObjectDescribe.getDescribe(objType).getField(fieldName));
+        checkFieldIsInsertable(objType, objType.getDescribe().fields.getMap().get(fieldName));
     }
 
     /**
@@ -237,7 +237,7 @@ public class fflib_SecurityUtils
     **/
     public static void checkFieldIsReadable(SObjectType objType, String fieldName)
     {
-    	checkFieldIsReadable(objType, fflib_SObjectDescribe.getDescribe(objType).getField(fieldName));
+        checkFieldIsReadable(objType, objType.getDescribe().fields.getMap().get(fieldName));
     }
 
     /**
@@ -268,7 +268,7 @@ public class fflib_SecurityUtils
     **/    
     public static void checkFieldIsUpdateable(SObjectType objType, String fieldName)
     {
-        checkFieldIsUpdateable(objType, fflib_SObjectDescribe.getDescribe(objType).getField(fieldName));
+        checkFieldIsUpdateable(objType, objType.getDescribe().fields.getMap().get(fieldName));
     }
 
     /**

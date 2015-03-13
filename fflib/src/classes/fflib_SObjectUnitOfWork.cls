@@ -52,7 +52,7 @@
  *
  **/
 public virtual class fflib_SObjectUnitOfWork
-	implements fflib_ISObjectUnitOfWork
+//FF_MOCKS	implements fflib_ISObjectUnitOfWork
 {
 	private List<Schema.SObjectType> m_sObjectTypes = new List<Schema.SObjectType>();
 	

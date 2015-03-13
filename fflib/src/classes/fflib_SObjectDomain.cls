@@ -39,7 +39,7 @@
  *
  **/
 public virtual with sharing class fflib_SObjectDomain
-	implements fflib_ISObjectDomain
+//FF_MOCKS	implements fflib_ISObjectDomain
 {
 	/**
 	 * Provides access to the data represented by this domain class
